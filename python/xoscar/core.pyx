@@ -18,16 +18,20 @@ import inspect
 import logging
 import sys
 import weakref
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator, Callable
 
 cimport cython
 
+from .aio import AioFileObject
 from .context cimport get_context
+
 from .errors import ActorNotExist, Return
+
 from ._utils cimport is_async_generator
 
 CALL_METHOD_DEFAULT = 0
 CALL_METHOD_BATCH = 1
+NO_LOCK_ATTRIBUTE_HINT = "__XOSCAR_ACTOR_METHOD_NO_LOCK__"
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +40,10 @@ cdef:
     bint _log_cycle_send = False
     dict _local_pool_map = dict()
     object _actor_method_wrapper
+
+def no_lock(func: Callable):
+    setattr(func, NO_LOCK_ATTRIBUTE_HINT, True)
+    return func
 
 
 def set_debug_options(options):
@@ -259,11 +267,24 @@ cdef class LocalActorRef(ActorRef):
             self.uid, self.address, self._actor_weakref)
 
 
+def _has_no_lock_hint_for_method(method) -> bool:
+    if getattr(method, NO_LOCK_ATTRIBUTE_HINT, False) is True:
+        return True
+    if hasattr(method, "__self__"):
+        return getattr(method.__self__, NO_LOCK_ATTRIBUTE_HINT, False) is True
+    return False
+
+
 async def __pyx_actor_method_wrapper(method, result_handler, lock, args, kwargs):
-    async with lock:
+    if _has_no_lock_hint_for_method(method):
         result = method(*args, **kwargs)
         if asyncio.iscoroutine(result):
             result = await result
+    else:
+        async with lock:
+            result = method(*args, **kwargs)
+            if asyncio.iscoroutine(result):
+                result = await result
     return await result_handler(result)
 
 # Avoid global lookup.
@@ -546,3 +567,79 @@ cdef class _FakeLock:
 cdef class _StatelessActor(_BaseActor):
     def _create_lock(self):
         return _FakeLock()
+
+
+cdef class BufferRef:
+    """
+    Reference of a buffer
+    """
+    _ref_to_buffers = weakref.WeakValueDictionary()
+
+    def __init__(self, str address, bytes uid):
+        self.uid = uid
+        self.address = address
+
+    @classmethod
+    def create(cls, buffer: Any, address: str, uid: bytes) -> "BufferRef":
+        ref = BufferRef(address, uid)
+        cls._ref_to_buffers[ref] = buffer
+        return ref
+
+    @classmethod
+    def get_buffer(cls, ref: "BufferRef"):
+        return cls._ref_to_buffers[ref]
+
+    def __getstate__(self):
+        return self.uid, self.address
+
+    def __setstate__(self, state):
+        self.uid, self.address = state
+
+    def __hash__(self):
+        return hash((self.address, self.uid))
+
+    def __eq__(self, other):
+        if type(other) != BufferRef:
+            return False
+        return self.address == other.address and self.uid == other.uid
+
+    def __repr__(self):
+        return f'BufferRef(uid={self.uid.hex()}, address={self.address})'
+
+
+cdef class FileObjectRef:
+    """
+    Reference of a file obj
+    """
+    _ref_to_fileobjs = weakref.WeakValueDictionary()
+
+    def __init__(self, str address, bytes uid):
+        self.uid = uid
+        self.address = address
+
+    @classmethod
+    def create(cls, fileobj: AioFileObject, address: str, uid: bytes) -> "FileObjectRef":
+        ref = FileObjectRef(address, uid)
+        cls._ref_to_fileobjs[ref] = fileobj
+        return ref
+
+    @classmethod
+    def get_local_file_object(cls, ref: "FileObjectRef") -> AioFileObject:
+        return cls._ref_to_fileobjs[ref]
+
+    def __getstate__(self):
+        return self.uid, self.address
+
+    def __setstate__(self, state):
+        self.uid, self.address = state
+
+    def __hash__(self):
+        return hash((self.address, self.uid))
+
+    def __eq__(self, other):
+        if type(other) != FileObjectRef:
+            return False
+        return self.address == other.address and self.uid == other.uid
+
+    def __repr__(self):
+        return f'FileObjectRef(uid={self.uid.hex()}, address={self.address})'

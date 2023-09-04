@@ -69,7 +69,7 @@ instance/
 .scrapy
 
 # Sphinx documentation
-docs/_build/
+generated/
 
 # PyBuilder
 target/
@@ -132,3 +132,19 @@ dmypy.json
 
 # cython compiled files
 python/xoscar/**/*.c*
+
+# cmake
+cmake-*
+CMakeFiles
+CMakeCache.txt
+*.cmake
+Makefile
+
+#config.h
+cpp/collective/gloo/include/config.h
+
+#filestore
+python/xoscar/collective/tests/collective
+
+#libuv
+python/xoscar/collective/uv.dll

@@ -23,6 +23,9 @@ from .api import (
     has_actor,
     destroy_actor,
     kill_actor,
+    buffer_ref,
+    file_object_ref,
+    copy_to,
     Actor,
     StatelessActor,
     create_actor_pool,
@@ -33,7 +36,7 @@ from .api import (
 from .backends import allocate_strategy
 from .backends.pool import MainActorPoolType
 from .batch import extensible
-from .core import ActorRef
+from .core import ActorRef, no_lock
 from .debug import set_debug_options, get_debug_options, DebugOptions
 from .errors import (
     ActorNotExist,
